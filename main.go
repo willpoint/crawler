@@ -18,7 +18,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-// frontier dispenses URLs according to its policies
+// frontier dispenses URLs according to its policies,
 // holds a list of seen URLs and a never-before-seen URLs
 type frontier struct {
 	seen   []*visitable
@@ -99,18 +99,17 @@ func display(s []*visitable) {
 }
 
 // TODO(uz) - implement a cache for robots.txt exclusion mechanism
-// robotsCache keeps a record exclusion URLs from visiting server
-// the key are a hash of the host
+// robotsCache keeps a record blacklist of URLs to not visit for a given server
+// the hash of the host is to serve as the key to the robots.txt data
 type robotsCache map[string][]string
 
-// Sanitize cache is applies a policy to clear the cache of robots.txt
-// data from sites - using time visited to free memory
+// Sanitize manages the cache using based on some yet undecided policies
 func (rc *robotsCache) Sanitize() {
 	// implementation ...
 }
 
 // visitable represents a URL and a flag indicating
-// that the page represented by the uri has been downloaded
+// that the page represented by the uri has been downloaded or not
 type visitable struct {
 	uri       *url.URL
 	visited   bool
@@ -118,7 +117,7 @@ type visitable struct {
 	visitedAt time.Time
 }
 
-// Add adds to the frontier's list of unseen visitables
+// Add adds to the frontier's list of unseen visitables,
 // must be safe for concurrent use by multiple goroutines
 func (f *frontier) Add(uri ...string) {
 	for _, i := range uri {
@@ -132,7 +131,8 @@ func (f *frontier) Add(uri ...string) {
 	}
 }
 
-// Eligible is called to retrieve the next visitable
+// Eligible is called to retrieve the next eligible visitable
+// It only takes the first item for now
 func (f *frontier) Eligible(ctx context.Context) <-chan string {
 	uri := make(chan string)
 	go func() {
@@ -190,18 +190,18 @@ type fetcher struct {
 	client  http.Client
 }
 
-// Save method helps to implement the Fetch interface
-// may or may not save the data in a repository
-// TODO(uz) make []byte be a datastore interface
-// that can Save([]byte)error the data
+// Save method helps to implement the Fetch interface that may
+// or may not save the data in a repository
 func (f *fetcher) Save(data []byte) {
+	// Implementation can be application dependent
+	// eg. you may implement connect to a redis server here
 	fmt.Println(string(data))
 }
 
 // urlFilter type returns a list of url strings
 // filtered based on some internal rules
-// it also ensures no URLs previously discovered so should be succeed
-// so it can be moved to the never-before-seen URLs
+// it also ensures no URLs previously discovered should be added
+// to the never-before-seen queue
 func urlFilter(f *frontier, uri string) (*url.URL, error) {
 	u, err := url.Parse(uri)
 	if err != nil {
@@ -219,6 +219,7 @@ func urlFilter(f *frontier, uri string) (*url.URL, error) {
 }
 
 // linkExtractor extracts hyperlinks from the downloaded page
+// it expects an io.Reader
 func linkExtractor(body io.Reader) (links []string, err error) {
 	doc, err := html.Parse(body)
 	if err != nil {
@@ -242,7 +243,7 @@ func linkExtractor(body io.Reader) (links []string, err error) {
 		}
 	}
 	f(doc)
-	return
+	return links, err
 }
 
 // Do method helps fetcher implement the Fetcher interface
