@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,14 +27,18 @@ type frontier struct {
 	lk     sync.Mutex
 }
 
-var frontierMan *frontier
-
 func main() {
 
-	// address := flag.String("address", "", "URL(s) to crawl - multiple URLs to be joined by an ampersand(&)")
-	//
-	seed := []string{"http://www.google.com"}
+	address := flag.String("seed", "", "URL(s) to crawl - multiple URLs to be joined by an ampersand(&)")
+	flag.Parse()
+
+	var seed []string
 	var iv []*visitable
+
+	if strings.Contains(*address, "&") {
+		seed = strings.Split(*address, "&")
+	}
+	seed = append(seed, *address)
 
 	for _, s := range seed {
 		u, err := url.Parse(s)
@@ -42,47 +48,47 @@ func main() {
 		iv = append(iv, &visitable{uri: u})
 	}
 
-	frontierMan = &frontier{
+	frnt := &frontier{
 		nbs:    iv,
 		filter: urlFilter,
 	}
 
-	ctx, timeout := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, timeout := context.WithTimeout(context.Background(), 15*time.Second)
 	defer timeout()
-	crawl(ctx)
-	<-ctx.Done()
-
+	go crawl(ctx, frnt)
+	select {
+	case <-ctx.Done():
+		for _, i := range frnt.seen {
+			fmt.Println(i.uri.String())
+		}
+	}
 }
 
-func crawl(ctx context.Context) {
-	var c func(ctx context.Context)
-	c = func(ctx context.Context) {
-		for url := range frontierMan.Eligible(ctx) {
+func crawl(ctx context.Context, frnt *frontier) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case url := <-frnt.Eligible(ctx):
 			ft, err := newFetcher(config{Address: url})
 			if err != nil {
 				continue // move on
 			}
 			_, body, err := ft.Do(ctx)
 			if err != nil {
-				continue
+				frnt.MarkSeen(url, false)
 			}
-			// go ft.Save(body)
-			frontierMan.MarkSeen(url)
 			r := bytes.NewReader(body)
 			links, err := linkExtractor(r)
 			if err != nil {
-				return
+				frnt.MarkSeen(url, false)
 			}
-			frontierMan.Add(links...)
-			frontierMan.nbs = frontierMan.nbs[1:]
-			display(frontierMan.seen)
-			fmt.Println(len(frontierMan.nbs))
-			if len(frontierMan.nbs) == 0 {
-				return
-			}
+			frnt.Add(links...)
+			frnt.Dequeue()
+			frnt.MarkSeen(url, true)
+
 		}
 	}
-	go c(ctx)
 }
 
 func display(s []*visitable) {
@@ -107,6 +113,7 @@ func (rc *robotsCache) Sanitize() {
 type visitable struct {
 	uri       *url.URL
 	visited   bool
+	success   bool
 	visitedAt time.Time
 }
 
@@ -126,8 +133,6 @@ func (f *frontier) Add(uri ...string) {
 
 // Eligible is called to retrieve the next visitable
 func (f *frontier) Eligible(ctx context.Context) <-chan string {
-	nbs := f.nbs
-	var next string
 	uri := make(chan string)
 	go func() {
 		defer close(uri)
@@ -137,29 +142,37 @@ func (f *frontier) Eligible(ctx context.Context) <-chan string {
 				return
 			default:
 			}
-			if len(nbs) == 0 {
+			if len(f.nbs) == 0 {
 				continue
 			}
-
-			next = nbs[0].uri.String()
-			nbs = f.nbs[1:]
-			uri <- next
-
+			uri <- f.nbs[0].uri.String()
 		}
 	}()
 	return uri
 }
 
+// Dequeue remove the first visitable from the queue of nbs
+func (f *frontier) Dequeue() {
+	f.lk.Lock()
+	defer f.lk.Unlock()
+	if len(f.nbs) == 0 {
+		return
+	}
+	f.nbs = f.nbs[1:]
+}
+
 // MarkSeen adds the uri visited to the frontier's list of seen
-func (f *frontier) MarkSeen(uri string) {
+func (f *frontier) MarkSeen(uri string, success bool) {
 	u, err := url.Parse(uri)
 	if err != nil {
 		return
 	}
 	f.lk.Lock()
+	// and add to seen
 	f.seen = append(f.seen, &visitable{
 		uri:       u,
 		visited:   true,
+		success:   success,
 		visitedAt: time.Now(),
 	})
 	f.lk.Unlock()
@@ -195,7 +208,7 @@ func urlFilter(f *frontier, uri string) (*url.URL, error) {
 	}
 	// TODO(uz) - add other rules to filter url
 	// eg. checking a blacklist of URLs
-	for _, sn := range f.nbs {
+	for _, sn := range f.seen {
 		if sn.uri.String() == uri {
 			return nil, errors.New("error: uri has been previously seen")
 		}

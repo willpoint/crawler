@@ -4,7 +4,7 @@ This prototypal web crawler design is
 purely for learning purposes and a 'non-distributed' adaptation from the paper on *Web Crawling* by [Christopher Olston and Marc Najork]()
 
 Each crawling process consists of multiple workers, and each 
-worker performs a repeated work cycle, the workers would run concurrently.
+worker performs a repeated work cycle.
 
 At the beginning of each work cycle, a worker obtains a URL from 
 the *Frontier* data structure, which dispenses URLs according to 
@@ -40,6 +40,6 @@ To meet this need, the crawler needs:
     **Testing** whether the set contains a URL 
 
 * Memory management 
-    There are many alternative in-memory data structures (eg.trees or sorted lists) that support these operations. However, such implementation does not scale to web sorpus sizes that exceed the amount of memory available on a single machine.
+    There are many alternative in-memory data structures (eg.trees or sorted lists) that support these operations. However, such implementation does not scale to web corpus sizes that exceed the amount of memory available on a single machine.
     To scale beyond this limitation, one could either maintain teh data structure(eg. tree or sorted list) on disk, or use an off-the-shelf database management system. 
     
