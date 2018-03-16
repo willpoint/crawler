@@ -30,6 +30,7 @@ type frontier struct {
 func main() {
 
 	address := flag.String("seed", "", "URL(s) to crawl - multiple URLs to be joined by an ampersand(&)")
+	duration := flag.Duration("duration", 15*time.Second, "Duration to crawl for - default is 15 seconds")
 	flag.Parse()
 
 	var seed []string
@@ -53,7 +54,7 @@ func main() {
 		filter: urlFilter,
 	}
 
-	ctx, timeout := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, timeout := context.WithTimeout(context.Background(), *duration)
 	defer timeout()
 	go crawl(ctx, frnt)
 	select {
